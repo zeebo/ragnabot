@@ -1,4 +1,8 @@
-
+def truncate(line, maxlen = 100):
+  if len(line) > maxlen:
+    return line[:maxlen-3] + "..."
+  return line
+  
 #Read dem packets
 packets = {}
 with open('packets.txt') as f:
@@ -11,9 +15,13 @@ with open('packets.txt') as f:
 #Read dem datas
 bytes = []
 with open('testpacks.packs') as f:
+  temp_datas = []
   for line in f:
-    if line.strip() != '':
-      bytes.extend(line.strip().split())
+    if line.strip() == '' and len(temp_datas):
+      bytes.extend(temp_datas[54:])
+      temp_datas = []
+    else:
+      temp_datas.extend(line.strip().split())
 
 print "Attempting to parse %d bytes" % len(bytes)
 
@@ -37,20 +45,10 @@ def reverse_bytes(data):
       yield iterable[i:i+amount]
   return ''.join(reversed(tuple(chunks(data, 2))))
 
-def truncate(line, maxlen = 100):
-  if len(line) > maxlen:
-    return line[:maxlen-3] + "..."
-  return line
-
-
 spitter = ByteSpitter(bytes)
 count = 0
 while spitter.has_data():
   header = spitter.spit(2)
-  while header == "0017":
-    spitter.skip(0x34)
-    header = spitter.spit(2)
-  
   packet_len = int(packets.get(header, 0))
   print packet_len, 
   if packet_len == -1:
