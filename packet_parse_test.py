@@ -60,26 +60,6 @@ while spitter.has_data():
   
   data = spitter.spit(packet_len - 2)  
 
-  print header, truncate(data)
+  print header, truncate(data, maxlen = 72)
   count += 1
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
