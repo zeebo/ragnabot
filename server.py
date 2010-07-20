@@ -9,9 +9,17 @@ def RequestHandlerFactory(server, port, processor):
     def handle(self):
       print "Got request (%s of %d): %s" % (threading.current_thread().getName(), threading.active_count(), self.request.getsockname())
       
+      
+      #At this point we have a client connecting to our proxy server
+      #and a specified server/port/data processor to pass to it
+      #this is terrible.
+      
       #Create a swapper object and pass in the client socket
       #and the address of the server to connect to
-      s = SwapHandler(self.request, server, port, processor)
+      try:
+        s = SwapHandler(self.request, server, port, processor)
+      except:
+        return
       
       #Begin the asyncore runloop
       s.loop()
@@ -37,8 +45,7 @@ if __name__ == '__main__':
   #ThreadedTCPServer(('localhost', 80), RequestHandlerFactory('google.com', 80)).serve_forever()
   
   server_list = (
-    (8000, 'google.com', 80, EchoProcessor),
-    (8001, 'forums.somethingawful.com', 80, SimpleReplacerFactory({'Python':'Doofus'})),
+    (8000, 'localhost', 80, EchoProcessor),
   )
   
   servers = start_servers(server_list)

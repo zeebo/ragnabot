@@ -43,15 +43,8 @@ class AsyncHandler(asyncore.dispatcher):
   
 class SwapHandler(object):
   def __init__(self, client_socket, server_address, server_port, processor):
-    try:
-      server_socket = socket.create_connection((server_address, server_port))
-    except socket.error, msg:
-      server_socket.close()
-      client_socket.close()
+    server_socket = socket.create_connection((server_address, server_port))
       
-      self.closed = ['server', 'client']
-      return
-    
     self.map = {}
     
     self.sockets = {
