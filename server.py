@@ -45,7 +45,7 @@ if __name__ == '__main__':
   #ThreadedTCPServer(('localhost', 80), RequestHandlerFactory('google.com', 80)).serve_forever()
   
   server_list = (
-    (8000, 'localhost', 80, EchoProcessor),
+    (6900, '216.83.36.53', 6900, EchoProcessor),
   )
   
   servers = start_servers(server_list)
