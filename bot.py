@@ -54,26 +54,42 @@ class PacketChunker(object):
     data_required = self.get_length(self.get_header())
     bytes = self.get_bytes(data_required)
     return ''.join(bytes[:2]), ''.join(bytes[2:])
-  
-class BotDispatcher(asyncore.dispatcher):
+
+class BasicDispatcher(asyncore.dispatcher):
   def __init__(self, *args, **kwargs):
     asyncore.dispatcher.__init__(self, *args, **kwargs)
     self.chunker = PacketChunker()
-  
+
   def handle_read(self):
     self.chunker.add_data(self.recv(1024))
     while self.chunker.has_packet():
       self.handle_packet(self.chunker.get_packet())
-  
-  def handle_packet(self, packet):
-    print packet
-  
+      
   def writable(self):
     return False
+  
+  def handle_open(self):
+    print "Connection made"
   
   def handle_close(self):
     print "Connection closed"
     self.close()
+    
+class BotDispatcher(BasicDispatcher):  
+  def handle_packet(self, packet):
+    print packet
+
+class LoginState(object):
+  def __init__(self, username, password):
+    self.username = username
+    self.password = password
+  
+  def login_packet(self):
+    return '\x64\x00\x18\x00\x00\x00%s%s\x12' % (self.username.ljust(24, '\x00'), self.password.ljust(24, '\x00'))
+
+class LoginDispatcher(asyncore.dispatcher):
+  def __init__(self):
+  
 
 client = socket.create_connection(('localhost', 50001))
 my_dispatcher = BotDispatcher(sock=client)
