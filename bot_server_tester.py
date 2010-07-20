@@ -7,6 +7,19 @@ with open('testpacks.packs') as f:
       temp_datas = []
     else:
       temp_datas.extend(line.strip().split())
-data = (chr(int(x, 16)) for x in bytes)
 
 #ok listen, accept, print data, close.
+
+import socket
+import SocketServer
+
+class RequestHandler(SocketServer.BaseRequestHandler):
+  def handle(self):
+    print 'Connected by', self.request.getsockname()
+    for byte in bytes:
+      self.request.send(chr(int(byte, 16)))
+    self.request.close()
+
+server = SocketServer.TCPServer(('', 50001), RequestHandler)
+server.serve_forever()
+
