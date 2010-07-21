@@ -7,6 +7,9 @@ def make_packet_parser(header, data_spec):
   if len(header) != 4:
     raise ParseError('Header must be two bytes')
   
+  if not all(isinstance(bytes, tuple) or isinstance(bytes, int) for _, bytes in data_spec):
+    raise ParseError('Invalid data type')
+  
   has_length = 'length' in (field_name for field_name, _ in data_spec)
   has_repeat = any(isinstance(bytes, tuple) for _, bytes in data_spec)
   if not has_repeat:
@@ -106,7 +109,7 @@ def make_packet_parser(header, data_spec):
         len_bytes = self.get_data(d_data_split, 2)
         p_data_len = int(''.join(reversed(len_bytes)), 16) - 4 #Subtract header/len bytes
       else:
-        p_data_len = data_len
+        p_data_len = data_len - 2
       
       if (p_data_len + 4) * 2 != len(self.raw_data):
         raise ParseError('Length mismatch. Expected %d and got %d' % ((p_data_len + 4) * 2, len(self.raw_data)))
@@ -148,6 +151,11 @@ class TestInvalidParsers(unittest.TestCase):
   def test_bad_header(self):
     self.assertRaises(ParseError, make_packet_parser, '00', None)
     self.assertRaises(ParseError, make_packet_parser, '000001', None)
+  def test_bad_data_type(self):
+    self.assertRaises(ParseError, make_packet_parser, '0000', (
+      ('repeat', 'lol'),
+    ))
+
   def test_repeat_no_len(self):
     self.assertRaises(ParseError, make_packet_parser, '0000', (
       ('repeat', (
@@ -196,12 +204,65 @@ class TestInvalidParsers(unittest.TestCase):
       ('field_1', 1),
     ))
 
-class TestParsing(unittest.TestCase):  
+class TestInvalidParsing(unittest.TestCase):
+  def setUp(self):
+    self.basic_parser = make_packet_parser('0012', (
+      ('field_1', 2),
+      ('field_2', 2),
+      ('field_3', 4),
+    ))().parse
+    
+    self.length_parser = make_packet_parser('0012', (
+      ('length', 2),
+      ('field_1', 4),
+      ('field_2', 0),
+    ))().parse
+    
+    self.repeat_parser = make_packet_parser('0012', (
+      ('length', 2),
+      ('field_1', 1),
+      ('field_2', (
+        ('field_3', 1),
+        ('field_4', 1),
+      )),
+    ))().parse
+  
+  def test_basic_wrong_length(self):
+    self.assertRaises(ParseError, self.basic_parser, '001200010002000000')
+    self.assertRaises(ParseError, self.basic_parser, '0012000100020000000300')
+  
+  def test_length_wrong_length(self):
+    self.assertRaises(ParseError, self.length_parser, '0012090000000000') #One too few bytes for length
+    self.assertRaises(ParseError, self.length_parser, '00120800000000')   #One too few before it gets to length
+  
+  def test_repeat_wrong_length(self):
+    self.assertRaises(ParseError, self.repeat_parser, '00120000010304')
+    self.assertRaises(ParseError, self.repeat_parser, '00120800010304')
+    self.assertRaises(ParseError, self.repeat_parser, '00120600010304')
+    self.assertRaises(ParseError, self.repeat_parser, '0012080001030405')
+  
+class TestValidParsing(unittest.TestCase):  
   def do_parse_test(self, parser, cases, responses, chunks):
     for data, response, chunk in izip_longest(cases, responses, chunks):
       parser.parse(data)
       self.assertEqual(parser.data_dict(), response)
       self.assertEqual(' '.join(parser.chunks), chunk)
+  
+  def test_basic(self):
+    test_parser = make_packet_parser('0012', (
+      ('field_1', 2),
+      ('field_2', 2),
+      ('field_3', 4),
+    ))
+    p = test_parser()
+    test_cases = ['00120001000200000003']
+    responses = [
+      {'field_2': ['00', '02'], 'field_3': ['00', '00', '00', '03'], 'field_1': ['00', '01']},
+    ]
+    chunks = [
+      '0012 0001 0002 00000003',
+    ]
+    self.do_parse_test(p, test_cases, responses, chunks)
   
   def test_repeat(self):
     test_parser = make_packet_parser('0012', (
