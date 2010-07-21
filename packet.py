@@ -1,4 +1,5 @@
-from itertools import izip
+from itertools import izip, izip_longest
+import unittest
 
 class ParseError(Exception): pass
 
@@ -143,8 +144,6 @@ def make_packet_parser(header, data_spec):
   
   return Packet
 
-import unittest
-
 class TestInvalidParsers(unittest.TestCase):
   def test_bad_header(self):
     self.assertRaises(ParseError, make_packet_parser, '00', None)
@@ -198,11 +197,8 @@ class TestInvalidParsers(unittest.TestCase):
     ))
 
 class TestParsing(unittest.TestCase):  
-  def do_parse_test(self, parser, cases, responses, chunks = None):
-    if chunks == None:
-      chunks = [None]*len(responses)
-    
-    for data, response, chunk in izip(cases, responses, chunks):
+  def do_parse_test(self, parser, cases, responses, chunks):
+    for data, response, chunk in izip_longest(cases, responses, chunks):
       parser.parse(data)
       self.assertEqual(parser.data_dict(), response)
       self.assertEqual(' '.join(parser.chunks), chunk)
