@@ -37,11 +37,13 @@ def make_packet_parser(header, data_spec):
     data_len = sum(bytes for _, bytes in data_spec)
   
   class Packet(object):
-    def __init__(self, d_data = ''):
+    def __init__(self, d_data = None):
       self.raw_data = d_data
       self.fields = []
-      self.parse(d_data)
       self.chunks = []
+      
+      if d_data != None:
+        self.parse(d_data)
     
     def data_len(self):
       if has_length:
@@ -87,19 +89,23 @@ def make_packet_parser(header, data_spec):
       d_data: '00ab....1345' string of bytes in hex code format
       """
       
-      if d_data == '':
-        return
-      
-      if len(d_data) < 8:
-        raise ParseError('No header to parse')
-      
       self.raw_data = d_data
       self.chunks = []
       
       while len(self.fields):
         delattr(self, self.fields.pop(0))
       
-      d_data_split = (''.join(x) for x in izip(*[iter(d_data)]*2))
+      if isinstance(d_data, str):
+        d_data_split = (''.join(x) for x in izip(*[iter(d_data)]*2))
+        raw_data_len = len(d_data) / 2
+      elif isinstance(d_data, list):
+        d_data_split = iter(d_data)
+        raw_data_len = len(d_data)
+      else:
+        raise ParseError('Unable to handle data type %s' % type(d_data))
+      
+      if raw_data_len < 4:
+        raise ParseError('No header to parse')
       
       d_header = ''.join(self.get_data(d_data_split, 2))
       if d_header != header:
@@ -111,8 +117,8 @@ def make_packet_parser(header, data_spec):
       else:
         p_data_len = data_len - 2
       
-      if (p_data_len + 4) * 2 != len(self.raw_data):
-        raise ParseError('Length mismatch. Expected %d and got %d' % ((p_data_len + 4) * 2, len(self.raw_data)))
+      if (p_data_len + 4) != raw_data_len:
+        raise ParseError('Length mismatch. Expected %d and got %d' % ((p_data_len + 4), raw_data_len))
       
       offset = 0
       for count, (field_name, bytes) in enumerate(data_spec):
@@ -247,7 +253,13 @@ class TestValidParsing(unittest.TestCase):
       parser.parse(data)
       self.assertEqual(parser.data_dict(), response)
       self.assertEqual(' '.join(parser.chunks), chunk)
-  
+      
+      pre_split_data = list(''.join(x) for x in izip(*[iter(data)]*2))
+      parser.parse(pre_split_data)
+      self.assertEqual(parser.data_dict(), response)
+      self.assertEqual(' '.join(parser.chunks), chunk)
+
+      
   def test_basic(self):
     test_parser = make_packet_parser('0012', (
       ('field_1', 2),
