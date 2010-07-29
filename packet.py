@@ -39,119 +39,89 @@ def make_packet_parser(header, data_spec):
   else:
     data_len = sum(bytes for _, bytes in data_spec)
   
-  class Packet(object):
-    def __init__(self, d_data = None):
-      self.raw_data = d_data
-      self.fields = []
-      self.chunks = []
-      
-      if d_data != None:
-        self.parse(d_data)
+  def parser(d_data, format = 'dict'):
+    """
+    parses data into specified data_spec.
+    d_data: '\x00\xAB....\x13\x45' string of bytes
+    """
+
+    chunks = []
+    data_dict = {}
     
-    def data_len(self):
-      if has_length:
-        return -1
-      #sum it
-      return sum(bytes for _, bytes in data_spec if not isinstance(bytes, tuple))
+    d_data_split = iter(d_data)
+    raw_data_len = len(d_data)
     
-    def __repr__(self):
-      chunks = []
-      for field_name, bytes in data_spec:
-        if isinstance(bytes, tuple):
-          chunks.append('%s.{' % field_name)
-          
-          for sub_field_name, sub_bytes in bytes:
-            chunks.append('%s:%d' % (sub_field_name, sub_bytes))
-          
-          chunks.append('}')
-        else:
-          if bytes == 0:
-            chunks.append('%s:-' % field_name)
-          else:
-            chunks.append('%s:%d' % (field_name, bytes))
-      return ' '.join(chunks)
+    def set_field(name, data):
+      if name != '_':
+        data_dict[name] = data
     
-    def data_dict(self):
-      return dict((name, getattr(self, name)) for name in self.fields)
-    
-    def get_data(self, data_gen, count):
+    def get_data(data_gen, count):
       try:
         returned_data = ''.join(data_gen.next() for _ in xrange(count))
-        self.chunks.append(hex_repr(returned_data))
+        chunks.append(hex_repr(returned_data))
         return returned_data
       except StopIteration:
         raise ParseError('Not enough data in packet.')
     
-    def set(self, name, data):
-      if name != '_':
-        self.fields.append(name)
-        setattr(self, name, data)
-  
-    def parse(self, d_data):
-      """
-      parses data into specified data_spec.
-      d_data: '\x00\xAB....\x13\x45' string of bytes
-      """
-      
-      self.raw_data = d_data
-      self.chunks = []
-      
-      while len(self.fields):
-        delattr(self, self.fields.pop(0))
-      
-      d_data_split = iter(d_data)
-      raw_data_len = len(d_data)
-      
-      if raw_data_len < 2:
-        raise ParseError('No header to parse')
-      
-      d_header = self.get_data(d_data_split, 2)
-      
-      if d_header != header:
-        raise ParseError('Header mismatch. Got %s, expected %s' % (hex_repr(d_header), hex_repr(header)))
-      
-      if data_len == -1:
-        len_bytes = self.get_data(d_data_split, 2)
-        p_data_len = ord(len_bytes[0]) + 256*ord(len_bytes[1]) - 4 #Subtract header/len bytes
+    if raw_data_len < 2:
+      raise ParseError('No header to parse')
+    
+    d_header = get_data(d_data_split, 2)
+    
+    if d_header != header:
+      raise ParseError('Header mismatch. Got %s, expected %s' % (hex_repr(d_header), hex_repr(header)))
+    
+    if data_len == -1:
+      len_bytes = get_data(d_data_split, 2)
+      p_data_len = ord(len_bytes[0]) + 256*ord(len_bytes[1]) - 4 #Subtract header/len bytes
+    else:
+      p_data_len = data_len - 2 #Subtract just the header bytes
+    
+    if (p_data_len + 4) != raw_data_len:
+      raise ParseError('Length mismatch. Expected %d and got %d' % ((p_data_len + 4), raw_data_len))
+    
+    offset = 0
+    for count, (field_name, bytes) in enumerate(data_spec):
+      if field_name == "length":
+        set_field(field_name, p_data_len + 4)
+      elif isinstance(bytes, tuple):
+        #Figure out how many bytes are going to be left on the end
+        other_data = sum(bytes for _, bytes in data_spec[count+1:])
+        field_list = []
+        
+        while p_data_len - offset > other_data:
+          sub_field_dict = {}
+          chunks.append('{')
+          for sub_field_name, sub_bytes in bytes:
+            data = get_data(d_data_split, sub_bytes)
+            offset += sub_bytes
+            if sub_field_name != '_':
+              sub_field_dict[sub_field_name] = data
+          field_list.append(sub_field_dict)
+          chunks.append('}')
+          
+        set_field(field_name, field_list)
       else:
-        p_data_len = data_len - 2 #Subtract just the header bytes
-      
-      if (p_data_len + 4) != raw_data_len:
-        raise ParseError('Length mismatch. Expected %d and got %d' % ((p_data_len + 4), raw_data_len))
-      
-      offset = 0
-      for count, (field_name, bytes) in enumerate(data_spec):
-        if field_name == "length":
-          self.set(field_name, p_data_len + 4)
-        elif isinstance(bytes, tuple):
-          #Figure out how many bytes are going to be left on the end
+        if bytes == 0:
+          #Figure out how many bytes we need to read
           other_data = sum(bytes for _, bytes in data_spec[count+1:])
-          field_list = []
-          
-          while p_data_len - offset > other_data:
-            sub_field_dict = {}
-            self.chunks.append('{')
-            for sub_field_name, sub_bytes in bytes:
-              data = self.get_data(d_data_split, sub_bytes)
-              offset += sub_bytes
-              if sub_field_name != '_':
-                sub_field_dict[sub_field_name] = data
-            field_list.append(sub_field_dict)
-            self.chunks.append('}')
-            
-          self.set(field_name, field_list)
-        else:
-          if bytes == 0:
-            #Figure out how many bytes we need to read
-            other_data = sum(bytes for _, bytes in data_spec[count+1:])
-            bytes = p_data_len - offset - other_data
-          
-          data = self.get_data(d_data_split, bytes)
-          offset += bytes
-          
-          self.set(field_name, data)
-  
-  return Packet
+          bytes = p_data_len - offset - other_data
+        
+        data = get_data(d_data_split, bytes)
+        offset += bytes
+        
+        set_field(field_name, data)
+      
+    if format == 'dict':
+      return data_dict
+    elif format == 'chunks':
+      return ' '.join(chunks)
+    elif format == 'all':
+      return data_dict, ' '.join(chunks)
+    else:
+      raise ParseError('Unknown format: %s' % format)
+      
+  return parser
 
 class TestInvalidParsers(unittest.TestCase):
   def test_bad_header(self):
@@ -216,13 +186,13 @@ class TestInvalidParsing(unittest.TestCase):
       ('field_1', 2),
       ('field_2', 2),
       ('field_3', 4),
-    ))().parse
+    ))
     
     self.length_parser = make_packet_parser('\x00\x12', (
       ('length', 2),
       ('field_1', 4),
       ('field_2', 0),
-    ))().parse
+    ))
     
     self.repeat_parser = make_packet_parser('\x00\x12', (
       ('length', 2),
@@ -231,7 +201,7 @@ class TestInvalidParsing(unittest.TestCase):
         ('field_3', 1),
         ('field_4', 1),
       )),
-    ))().parse
+    ))
   
   def test_basic_wrong_length(self):
     self.assertRaises(ParseError, self.basic_parser, '\x00\x12\x00\x01\x00\x02\x00\x00\x00')
@@ -250,14 +220,14 @@ class TestInvalidParsing(unittest.TestCase):
 class TestValidParsing(unittest.TestCase):  
   def do_parse_test(self, parser, cases, responses, chunks):
     for data, response, chunk in izip_longest(cases, responses, chunks):
-      parser.parse(data)
-      self.assertEqual(parser.data_dict(), response)
-      self.assertEqual(' '.join(parser.chunks), chunk)
+      data_dict, data_chunks = parser(data, format = "all")
+      self.assertEqual(data_dict, response)
+      self.assertEqual(data_chunks, chunk)
       
       pre_split_data = list(iter(data))
-      parser.parse(pre_split_data)
-      self.assertEqual(parser.data_dict(), response)
-      self.assertEqual(' '.join(parser.chunks), chunk)
+      data_dict, data_chunks = parser(pre_split_data, format = "all")
+      self.assertEqual(data_dict, response)
+      self.assertEqual(data_chunks, chunk)
   
   def test_multiple_uncaptured(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -265,7 +235,6 @@ class TestValidParsing(unittest.TestCase):
       ('_', 2),
       ('_', 2),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x00\x01\x99\x99\x00\x02']
     responses = [
       {'field_1': '\x00\x01'},
@@ -273,7 +242,7 @@ class TestValidParsing(unittest.TestCase):
     chunks = [
       '0012 0001 9999 0002',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_uncaputred_in_repeat(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -284,7 +253,6 @@ class TestValidParsing(unittest.TestCase):
         ('field_3', 2),
       )),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x0A\x00\x00\x01\x99\x99\x00\x02', '\x00\x12\x10\x00\x00\x01\x99\x99\x00\x02\x00\x03\x99\x99\x00\x04']
     responses = [
       {'length': 10, 'field_1': [{'field_2': '\x00\x01', 'field_3': '\x00\x02'}]},
@@ -294,7 +262,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0A00 { 0001 9999 0002 }',
       '0012 1000 { 0001 9999 0002 } { 0003 9999 0004 }',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_uncaputred(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -302,7 +270,6 @@ class TestValidParsing(unittest.TestCase):
       ('_', 2),
       ('field_2', 2),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x00\x01\x99\x99\x00\x02']
     responses = [
       {'field_1': '\x00\x01', 'field_2': '\x00\x02'},
@@ -310,7 +277,7 @@ class TestValidParsing(unittest.TestCase):
     chunks = [
       '0012 0001 9999 0002',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_basic(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -318,7 +285,6 @@ class TestValidParsing(unittest.TestCase):
       ('field_2', 2),
       ('field_3', 4),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x00\x01\x00\x02\x00\x00\x00\x03']
     responses = [
       {'field_2': '\x00\x02', 'field_3': '\x00\x00\x00\x03', 'field_1': '\x00\x01'},
@@ -326,7 +292,7 @@ class TestValidParsing(unittest.TestCase):
     chunks = [
       '0012 0001 0002 00000003',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_repeat(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -336,7 +302,6 @@ class TestValidParsing(unittest.TestCase):
                     ('what', 1),
                   )),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x06\x00\x12\x34', '\x00\x12\x08\x00\x12\x34\x56\x78']
     responses = [
       {'length': 6, 'field_3': [{'what': '\x34', 'lol': '\x12'}]},
@@ -346,9 +311,8 @@ class TestValidParsing(unittest.TestCase):
       '0012 0600 { 12 34 }',
       '0012 0800 { 12 34 } { 56 78 }',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
     
-  
   def test_repeat_clamped(self):
     test_parser = make_packet_parser('\x00\x12', (
       ('length', 2),
@@ -359,7 +323,6 @@ class TestValidParsing(unittest.TestCase):
                   )),
       ('field_4', 1),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x09\x00\x01\x00\x12\x34\x04', '\x00\x12\x0B\x00\x01\x00\x12\x34\x56\x78\x04']
     responses = [
       {'length': 9, 'field_4': '\x04', 'field_3': [{'what': '\x34', 'lol': '\x12'}], 'field_1': '\x01\x00'},
@@ -369,7 +332,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0900 0100 { 12 34 } 04',
       '0012 0B00 0100 { 12 34 } { 56 78 } 04',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_repeat_no_after(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -380,7 +343,6 @@ class TestValidParsing(unittest.TestCase):
                     ('what', 1),
                   )),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x07\x00\x02\x12\x34', '\x00\x12\x09\x00\x02\x12\x34\x56\x78']
     responses = [
       {'length': 7, 'field_2': '\x02', 'field_3': [{'what': '\x34', 'lol': '\x12'}]},
@@ -390,7 +352,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0700 02 { 12 34 }',
       '0012 0900 02 { 12 34 } { 56 78 }',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
     
   def test_repeat_no_before(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -401,7 +363,6 @@ class TestValidParsing(unittest.TestCase):
                   )),
       ('field_1', 1),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x07\x00\x12\x34\x01', '\x00\x12\x09\x00\x12\x34\x56\x78\x01']
     responses = [
       {'length': 7, 'field_3': [{'what': '\x34', 'lol': '\x12'}], 'field_1': '\x01'},
@@ -411,14 +372,13 @@ class TestValidParsing(unittest.TestCase):
       '0012 0700 { 12 34 } 01',
       '0012 0900 { 12 34 } { 56 78 } 01',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_len(self):
     test_parser = make_packet_parser('\x00\x12', (
       ('length', 2),
       ('field_3', 0),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x06\x00\x12\x34', '\x00\x12\x08\x00\x12\x34\x56\x78', '\x00\x12\x04\x00']
     responses = [
       {'length': 6, 'field_3': '\x12\x34'},
@@ -430,7 +390,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0800 12345678',
       '0012 0400 ',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_len_before(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -438,7 +398,6 @@ class TestValidParsing(unittest.TestCase):
       ('field_1', 1),
       ('field_3', 0),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x07\x00\x01\x12\x34', '\x00\x12\x09\x00\x01\x12\x34\x56\x78']
     responses = [
       {'length': 7, 'field_3': '\x12\x34', 'field_1': '\x01'},
@@ -448,7 +407,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0700 01 1234',
       '0012 0900 01 12345678',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_len_after(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -456,7 +415,6 @@ class TestValidParsing(unittest.TestCase):
       ('field_3', 0),
       ('field_1', 1),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x06\x00\x12\x34', '\x00\x12\x08\x00\x12\x34\x56\x78']
     responses = [
       {'length': 6, 'field_3': '\x12', 'field_1': '\x34'},
@@ -466,8 +424,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0600 12 34',
       '0012 0800 123456 78',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
-    
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
   
   def test_len_clamped(self):
     test_parser = make_packet_parser('\x00\x12', (
@@ -476,7 +433,6 @@ class TestValidParsing(unittest.TestCase):
       ('field_3', 0),
       ('field_2', 1),
     ))
-    p = test_parser()
     test_cases = ['\x00\x12\x07\x00\x12\x00\x34', '\x00\x12\x08\x00\x12\x34\x56\x78']
     responses = [
       {'length': 7, 'field_2': '\x34', 'field_3': '\x00', 'field_1': '\x12'},
@@ -486,7 +442,7 @@ class TestValidParsing(unittest.TestCase):
       '0012 0700 12 00 34',
       '0012 0800 12 3456 78',
     ]
-    self.do_parse_test(p, test_cases, responses, chunks)
+    self.do_parse_test(test_parser, test_cases, responses, chunks)
 
 
 if __name__ == '__main__':
