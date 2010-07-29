@@ -4,7 +4,7 @@ import unittest
 class ParseError(Exception): pass
 
 def hex_repr(data):
-  return ''.join('%.2X' % ord(c) for c in data)
+  return ''.join('%.2X' % ord(str(c)) for c in data)
 
 def make_packet_parser(header, data_spec):
   if len(header) != 2:
@@ -39,12 +39,15 @@ def make_packet_parser(header, data_spec):
   else:
     data_len = sum(bytes for _, bytes in data_spec)
   
+  #Make a copy of data_spec and header
+  data_spec, header = data_spec[:], header[:]
+  
   def parser(d_data, format = 'dict'):
     """
     parses data into specified data_spec.
     d_data: '\x00\xAB....\x13\x45' string of bytes
     """
-
+    
     chunks = []
     data_dict = {}
     
@@ -217,7 +220,7 @@ class TestInvalidParsing(unittest.TestCase):
     self.assertRaises(ParseError, self.repeat_parser, '\x00\x12\x06\x00\x01\x03\x04')
     self.assertRaises(ParseError, self.repeat_parser, '\x00\x12\x08\x00\x01\x03\x04\x05\x06')
   
-class TestValidParsing(unittest.TestCase):  
+class TestValidParsing(unittest.TestCase):
   def do_parse_test(self, parser, cases, responses, chunks):
     for data, response, chunk in izip_longest(cases, responses, chunks):
       data_dict, data_chunks = parser(data, format = "all")
@@ -228,6 +231,34 @@ class TestValidParsing(unittest.TestCase):
       data_dict, data_chunks = parser(pre_split_data, format = "all")
       self.assertEqual(data_dict, response)
       self.assertEqual(data_chunks, chunk)
+  
+  def test_reaches_internal_functions(self):
+    header = '\x00\x12'
+    format = [('field', 2)]
+    test_parser = make_packet_parser(header, format)
+    
+    self.assertFalse(hasattr(test_parser, 'set_field'))
+  
+  def test_parse_format_changed(self):
+    from UserString import MutableString
+    header = MutableString('lo')
+    format = [('field', 2)]
+    test_parser = make_packet_parser(header, format)
+    
+    self.do_parse_test(test_parser,
+      ['lo\x00\x00'],
+      [{'field': '\x00\x00'}],
+      ['6C6F 0000'],
+    )
+    
+    format += [('field2', 2)]
+    header.append('l')
+    
+    self.do_parse_test(test_parser,
+      ['lo\x00\x00'],
+      [{'field': '\x00\x00'}],
+      ['6C6F 0000'],
+    )
   
   def test_multiple_uncaptured(self):
     test_parser = make_packet_parser('\x00\x12', (
