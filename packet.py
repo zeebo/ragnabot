@@ -126,6 +126,7 @@ def make_packet_parser(header, data_spec):
       
   return parser
 
+
 class TestInvalidParsers(unittest.TestCase):
   def test_bad_header(self):
     self.assertRaises(ParseError, make_packet_parser, '\x00', None)
