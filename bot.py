@@ -1,6 +1,26 @@
 import asyncore
 import socket
 
+from packet import make_packet_parser
+LoginResponseParser = make_packet_parser('6900', (
+  ('length', 2),
+  ('l_id1', 4),
+  ('a_id', 4),
+  ('l_id2', 4),
+  ('_', 4),
+  ('_', 24),
+  ('_', 2),
+  ('sex', 1),
+  ('servers', (
+    ('ip', 4),
+    ('port', 2),
+    ('name', 20),
+    ('users', 2),
+    ('_', 2),
+    ('_', 2),
+  )),
+))
+
 class ParseError(Exception): pass
 
 class PacketChunker(object):
@@ -107,12 +127,19 @@ class LoginDispatcher(asyncore.dispatcher):
     self.close()
   
   def handle_read(self):
-    self.buffer.append(self.recv(1024))
-    print self.buffer
-  
+    data = self.recv(1024)
+    self.buffer.append(data)
+    hex_data = ''.join("%.2X" % ord(c) for c in data)
+    print hex_data
+    packet = LoginResponseParser(hex_data)
+    print packet.data_dict()
+    print ' '.join(packet.chunks)
+    
   def handle_write(self):
     self.send(self.state.login_packet())
     self.state.sent_login()
+
+
 
 
 login_socket = socket.create_connection(('192.168.1.5', 6900))
