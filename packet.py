@@ -18,7 +18,7 @@ def make_packet_parser(header, data_spec):
     repeat_tuple = (bytes for _, bytes in data_spec if isinstance(bytes, tuple)).next() 
     repeat_len = sum(bytes for _, bytes in repeat_tuple)
   
-  if len(set(field_name for field_name, _ in data_spec)) != len(data_spec):
+  if len(set(field_name for field_name, _ in data_spec if field_name != '_')) != len([field_name for field_name, _ in data_spec if field_name != '_']):
     raise ParseError('Duplicate field names')
   if has_repeat and not has_length:
     raise ParseError('Repeat without length field')
@@ -80,8 +80,9 @@ def make_packet_parser(header, data_spec):
         raise ParseError('Not enough data in packet.')
     
     def set(self, name, data):
-      self.fields.append(name)
-      setattr(self, name, data)
+      if name != '_':
+        self.fields.append(name)
+        setattr(self, name, data)
   
     def parse(self, d_data):
       """
@@ -135,7 +136,8 @@ def make_packet_parser(header, data_spec):
             for sub_field_name, sub_bytes in bytes:
               data = self.get_data(d_data_split, sub_bytes)
               offset += sub_bytes
-              sub_field_dict[sub_field_name] = data
+              if sub_field_name != '_':
+                sub_field_dict[sub_field_name] = data
             field_list.append(sub_field_dict)
             self.chunks.append('}')
             
@@ -258,8 +260,60 @@ class TestValidParsing(unittest.TestCase):
       parser.parse(pre_split_data)
       self.assertEqual(parser.data_dict(), response)
       self.assertEqual(' '.join(parser.chunks), chunk)
-
-      
+  
+  def test_multiple_uncaptured(self):
+    test_parser = make_packet_parser('0012', (
+      ('field_1', 2),
+      ('_', 2),
+      ('_', 2),
+    ))
+    p = test_parser()
+    test_cases = ['0012000199990002']
+    responses = [
+      {'field_1': ['00', '01']},
+    ]
+    chunks = [
+      '0012 0001 9999 0002',
+    ]
+    self.do_parse_test(p, test_cases, responses, chunks)
+  
+  def test_uncaputred_in_repeat(self):
+    test_parser = make_packet_parser('0012', (
+      ('length', 2),
+      ('field_1', (
+        ('field_2', 2),
+        ('_', 2),
+        ('field_3', 2),
+      )),
+    ))
+    p = test_parser()
+    test_cases = ['00120a00000199990002', '00121000000199990002000399990004']
+    responses = [
+      {'length': 10, 'field_1': [{'field_2': ['00', '01'], 'field_3': ['00', '02']}]},
+      {'length': 16, 'field_1': [{'field_2': ['00', '01'], 'field_3': ['00', '02']}, {'field_2': ['00', '03'], 'field_3': ['00', '04']}]},
+    ]
+    chunks = [
+      '0012 0a00 { 0001 9999 0002 }',
+      '0012 1000 { 0001 9999 0002 } { 0003 9999 0004 }',
+    ]
+    self.do_parse_test(p, test_cases, responses, chunks)
+  
+  def test_uncaputred(self):
+    test_parser = make_packet_parser('0012', (
+      ('field_1', 2),
+      ('_', 2),
+      ('field_2', 2),
+    ))
+    p = test_parser()
+    test_cases = ['0012000199990002']
+    responses = [
+      {'field_1': ['00', '01'], 'field_2': ['00', '02']},
+    ]
+    chunks = [
+      '0012 0001 9999 0002',
+    ]
+    self.do_parse_test(p, test_cases, responses, chunks)
+  
   def test_basic(self):
     test_parser = make_packet_parser('0012', (
       ('field_1', 2),
