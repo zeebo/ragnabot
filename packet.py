@@ -59,12 +59,13 @@ def make_packet_parser(header, data_spec):
         data_dict[name] = data
     
     def get_data(data_gen, count):
-      try:
-        returned_data = ''.join(data_gen.next() for _ in xrange(count))
-        chunks.append(hex_repr(returned_data))
-        return returned_data
-      except StopIteration:
+      returned_data = ''.join(data_gen.next() for _ in xrange(count))
+      
+      if len(returned_data) != count:
         raise ParseError('Not enough data in packet.')
+      
+      chunks.append(hex_repr(returned_data))
+      return returned_data
     
     if raw_data_len < 2:
       raise ParseError('No header to parse')
@@ -220,6 +221,9 @@ class TestInvalidParsing(unittest.TestCase):
     self.assertRaises(ParseError, self.repeat_parser, '\x00\x12\x08\x00\x01\x03\x04')
     self.assertRaises(ParseError, self.repeat_parser, '\x00\x12\x06\x00\x01\x03\x04')
     self.assertRaises(ParseError, self.repeat_parser, '\x00\x12\x08\x00\x01\x03\x04\x05\x06')
+  
+  def test_repeat_right_length_wrong_repeat(self):
+    self.assertRaises(ParseError, self.repeat_parser, '\x00\x12\x08\x00\x01\x03\x04\x03')
   
 class TestValidParsing(unittest.TestCase):
   def do_parse_test(self, parser, cases, responses, chunks):
